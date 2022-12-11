@@ -6,6 +6,7 @@ authors = ["René Mayrhofer <rene@mayrhofer.eu.org>"]
 [dependencies]
 walkdir = "2"
 rust-crypto = "0.2.36"
+filebuffer = "0.4.0"
 
 [profile.release]
 strip = "debuginfo"
