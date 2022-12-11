@@ -1,0 +1,11 @@
+[package]
+name = "hashdeep"
+version = "0.1.5"
+authors = ["René Mayrhofer <rene@mayrhofer.eu.org>"]
+
+[dependencies]
+walkdir = "2"
+rust-crypto = "0.2.36"
+
+[profile.release]
+strip = "debuginfo"
