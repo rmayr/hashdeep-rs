@@ -13,7 +13,9 @@ clap = { version = "^4", default-features = false, features = ["std", "help", "c
 
 # optimize for binary size, see e.g. https://arusahni.net/blog/2020/03/optimizing-rust-binary-size.html
 [profile.release]
-strip = "debuginfo"
-opt-level = "s"
+#strip = "debuginfo"
+# be even more aggressive with stripping to optimize for binary size by default in release binary
+strip = true
+opt-level = "z"
 lto = true
 codegen-units = 1
