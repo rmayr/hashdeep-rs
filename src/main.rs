@@ -1,11 +1,11 @@
-extern crate crypto;
-//extern crate blake3;
+//extern crate crypto;
+extern crate blake3;
 extern crate walkdir;
 extern crate filebuffer;
 extern crate clap;
 
-use crypto::digest::Digest;
-use crypto::sha2::Sha256;
+/*use crypto::digest::Digest;
+use crypto::sha2::Sha256;*/
 use filebuffer::FileBuffer;
 use walkdir::WalkDir;
 use clap::Parser;
@@ -27,6 +27,12 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
+    let mut hasher = /*match args.hasher {
+        "sha256" => Sha256::new() ,
+        "blake3" => */ blake3::Hasher::new() /*,
+        _ => panic!("unknown hash function")
+    }*/;
+
     for entry in WalkDir::new(args.path).sort_by_file_name().into_iter().filter_map(|e| e.ok()) {
         let fname = entry.path();
         if ! fname.is_file() {
@@ -34,15 +40,16 @@ fn main() {
         }
         
         let fbuf = FileBuffer::open(&fname).expect(&format!("failed to open file {}", fname.display()).to_string());
-        let mut hasher = /*match args.hasher  {
-            "sha256" => */ Sha256::new() /*,
+        /*let mut hasher = match args.hasher  {
+            "sha256" => Sha256::new(),
             "blake3" => blake3::Hasher::new(),
             _ => panic!("unknown hash function"),
         } */ ;
-        hasher.input(&fbuf);
+        hasher.reset();
+        hasher.update(&fbuf);
 
         // TODO: include hash-of-hashes for (sorted) files in directory
 
-        println!("{}: {}", hasher.result_str(), fname.display());
+        println!("{}: {}", hasher.finalize().to_hex(), fname.display());
     }
 }
