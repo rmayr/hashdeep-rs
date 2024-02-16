@@ -5,7 +5,7 @@ authors = ["René Mayrhofer <rm@ins.jku.at>"]
 #about = "Recursively compute file hashes over a tree"
 
 [features]
-default = ["blake3"]
+default = ["blake3", "sha2", "sha3"]
 blake3 = ["dep:blake3"]
 sha2 = ["dep:sha2"]
 sha3 = ["dep:sha3"]
