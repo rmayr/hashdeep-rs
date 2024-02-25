@@ -66,6 +66,6 @@ fn scan_dir<D: Digest>(path: &str)
         digest.update(&fbuf);
 
         let fhash = digest.finalize();
-        println!("{:x}: {}", fhash, fname.display());
+        println!("{:x}  {}", fhash, fname.display());
     }
 }
