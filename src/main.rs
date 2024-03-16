@@ -40,11 +40,12 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
+    let mut audit_map = None;
     if args.audit.is_some() {
         let audit_file = args.audit.unwrap();
         println!("Reading hashes from {}", audit_file);
         let faudit = FileBuffer::open(&audit_file).expect(&format!("failed to open file {}", audit_file).to_string());
-        /*let audit_map = ["hash", "path"].into_iter()
+        /*audit_map = ["hash", "path"].into_iter()
             .zip(faudit.lines().map(|l| l.expect("Unable to read line {}").split_once(char::is_whitespace)))
             .collect::<HashMap<_, _>>();
         println!("{:#?}", audit_map);*/
@@ -53,19 +54,19 @@ fn main() {
 
     match args.hasher.as_str() {
         #[cfg(feature = "sha2")]
-        "sha2" => scan_dir::<sha2::Sha256>(&args.path),
+        "sha2" => scan_dir::<sha2::Sha256>(&args.path, audit_map),
 
         #[cfg(feature = "sha3")]
-        "sha3" => scan_dir::<sha3::Sha3_256>(&args.path),
+        "sha3" => scan_dir::<sha3::Sha3_256>(&args.path, audit_map),
 
         #[cfg(feature = "blake3")]
-        "blake3" => scan_dir::<blake3::Hasher>(&args.path),
+        "blake3" => scan_dir::<blake3::Hasher>(&args.path, audit_map),
 
         _ => panic!("unknown hash function")
     };
 }
 
-fn scan_dir<D: Digest>(path: &str)
+fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
@@ -77,12 +78,23 @@ fn scan_dir<D: Digest>(path: &str)
 
         let fbuf = FileBuffer::open(&fname).expect(&format!("failed to open file {}", fname.display()).to_string());
 
-        // this is not optimal from a performance point of view, but reset is problamatic with re-using the digest in the generic case
+        // this may not be optimal from a performance point of view, but reset is problematic with re-using the digest in the generic case
         let mut digest = D::new();
         //Digest::reset(&mut digest);
         digest.update(&fbuf);
 
         let fhash = digest.finalize();
-        println!("{:x}  {}", fhash, fname.display());
+        match audit_map {
+            Some(ref m) => {
+                /*if m.contains_key(&fhash.to_string()) {
+                    if (m.get(&fhash.to_string()).unwrap() != fname.display().to_string()) {
+                        println!("{}  {}  (mismatch)", fhash, fname.display());
+                    }
+                }*/
+            },
+            None => {
+                println!("{:x}  {}", fhash, fname.display());
+            }
+        }
     }
 }
