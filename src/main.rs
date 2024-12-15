@@ -20,9 +20,7 @@ use walkdir::WalkDir;
 use clap::Parser;
 
 #[derive(Parser)]
-// TODO: why isn't this read from Cargo.toml?
-//#[command(author, version, about, long_about = None)]
-#[command(author = "René Mayrhofer", version, about = "Recursively compute file hashes over a tree", long_about = None)]
+#[command(author, version, about, long_about = "Recursively compute or verify (in audit mode) hashes over a directory tree, sorted lexicographically for deterministic output and supporting different hash algorithms. This is a lot like the older sha*deep utilities, but uses memory safe code and parallelizes I/O access for fast operation.")]
 struct Args {
     /// Directory path to start recursive traversal from
     #[arg(short = 'p', long, default_value_t = String::from("."))]
