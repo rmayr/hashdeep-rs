@@ -33,7 +33,15 @@ struct Args {
     /// Auditing mode: read hashes from file specific by this parameter and compare with files in path.
     #[arg(short = 'a', long)]
     audit: Option<String>,
- }
+
+    /// Compatibility flag for easier replacement of hashdeep/sha256deep/sha3deep: ignored because hashdeep-rs works in recursive mode by default
+    #[arg(short = 'r', long)]
+    recursive: bool,
+
+    /// Compatibility flag for easier replacement of hashdeep: output uses the <size>,<hash>,<full absolute file path> format
+    #[arg(short = 'C', long, default_value_t = false)]
+    compatoutput: bool,
+}
 
 fn main() {
     let args = Args::parse();
@@ -52,19 +60,19 @@ fn main() {
 
     match args.hasher.as_str() {
         #[cfg(feature = "sha2")]
-        "sha2" => scan_dir::<sha2::Sha256>(&args.path, audit_map),
+        "sha2" => scan_dir::<sha2::Sha256>(&args.path, audit_map, args.compatoutput),
 
         #[cfg(feature = "sha3")]
-        "sha3" => scan_dir::<sha3::Sha3_256>(&args.path, audit_map),
+        "sha3" => scan_dir::<sha3::Sha3_256>(&args.path, audit_map, args.compatoutput),
 
         #[cfg(feature = "blake3")]
-        "blake3" => scan_dir::<blake3::Hasher>(&args.path, audit_map),
+        "blake3" => scan_dir::<blake3::Hasher>(&args.path, audit_map, args.compatoutput),
 
         _ => panic!("unknown hash function")
     };
 }
 
-fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>)
+fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>, compat_output: bool)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
@@ -92,7 +100,12 @@ fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>)
                 }*/
             },
             None => {
-                println!("{:x}  {}", fhash, fname.display());
+                if compat_output {
+                    println!("{},{:x},{}", fname.metadata().expect("failed to get file metadata").len(), fhash,
+                             fname.canonicalize().expect("failed to canonicalize path").display());
+                } else {
+                    println!("{:x}  {}", fhash, fname.display());
+                }
             }
         }
     }
