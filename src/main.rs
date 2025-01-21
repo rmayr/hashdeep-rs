@@ -68,6 +68,7 @@ fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
+    // TODO: parallelize for efficiency, but keep ordering for output, see e.g. https://users.rust-lang.org/t/whats-the-fastest-way-to-read-a-lot-of-files/39743/10
     for entry in WalkDir::new(path).sort_by_file_name().into_iter().filter_map(|e| e.ok()) {
         let fname = entry.path();
         if ! fname.is_file() {
