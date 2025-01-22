@@ -46,16 +46,15 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let mut audit_map = None;
+    let mut audit_map: Option<HashMap<&str, &str>> = None;
     if args.audit.is_some() {
         let audit_file = args.audit.unwrap();
         println!("Reading hashes from {}", audit_file);
-        let faudit = FileBuffer::open(&audit_file).expect(&format!("failed to open file {}", audit_file).to_string());
-        /*audit_map = ["hash", "path"].into_iter()
-            .zip(faudit.lines().map(|l| l.expect("Unable to read line {}").split_once(char::is_whitespace)))
-            .collect::<HashMap<_, _>>();
-        println!("{:#?}", audit_map);*/
-        panic!("not fully implemented")
+        let faudit = FileBuffer::open(&audit_file).expect(&format!("Failed to open file {}", audit_file).to_string());
+        let map: HashMap<&str, &str> = faudit.lines().map(|l| l.unwrap_or_default()
+                .split_once(char::is_whitespace).expect("Unable to split line {}, audit file is in invalid format")).collect();
+        println!("{:#?}", &map);
+        audit_map = Some(map);
     }
 
     match args.hasher.as_str() {
@@ -72,7 +71,7 @@ fn main() {
     };
 }
 
-fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>, compat_output: bool)
+fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<&str, &str>>, compat_output: bool)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
@@ -83,7 +82,7 @@ fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>, c
             continue;
         }
 
-        let fbuf = FileBuffer::open(&fname).expect(&format!("failed to open file {}", fname.display()).to_string());
+        let fbuf = FileBuffer::open(&fname).expect(&format!("Failed to open file {}", fname.display()).to_string());
 
         // this may not be optimal from a performance point of view, but reset is problematic with re-using the digest in the generic case
         let mut digest = D::new();
@@ -92,7 +91,7 @@ fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>, c
 
         let fhash = digest.finalize();
         match audit_map {
-            Some(ref m) => {
+            Some(ref _m) => {
                 /*if m.contains_key(&fhash.to_string()) {
                     if (m.get(&fhash.to_string()).unwrap() != fname.display().to_string()) {
                         println!("{}  {}  (mismatch)", fhash, fname.display());
@@ -101,8 +100,8 @@ fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>, c
             },
             None => {
                 if compat_output {
-                    println!("{},{:x},{}", fname.metadata().expect("failed to get file metadata").len(), fhash,
-                             fname.canonicalize().expect("failed to canonicalize path").display());
+                    println!("{},{:x},{}", fname.metadata().expect("Failed to get file metadata of {}").len(), fhash,
+                             fname.canonicalize().expect("Failed to canonicalize path {}").display());
                 } else {
                     println!("{:x}  {}", fhash, fname.display());
                 }
