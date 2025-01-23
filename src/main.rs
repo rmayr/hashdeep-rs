@@ -46,13 +46,13 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let mut audit_map: Option<HashMap<&str, &str>> = None;
-    if args.audit.is_some() {
-        let audit_file = args.audit.unwrap();
+    let mut audit_map: Option<HashMap<String, String>> = None;
+    if let Some(audit_file) = args.audit {
         println!("Reading hashes from {}", audit_file);
         let faudit = FileBuffer::open(&audit_file).expect(&format!("Failed to open file {}", audit_file).to_string());
-        let map: HashMap<&str, &str> = faudit.lines().map(|l| l.unwrap_or_default()
-                .split_once(char::is_whitespace).expect("Unable to split line {}, audit file is in invalid format")).collect();
+        let map: HashMap<String, String> = faudit.lines().map(|l| l.unwrap_or_default()
+                .split_once(char::is_whitespace).expect("Unable to split line {}, audit file is in invalid format")
+                .map(| (l, r) | (l.to_string(), r.to_string()))).collect();
         println!("{:#?}", &map);
         audit_map = Some(map);
     }
@@ -71,7 +71,7 @@ fn main() {
     };
 }
 
-fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<&str, &str>>, compat_output: bool)
+fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>, compat_output: bool)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
