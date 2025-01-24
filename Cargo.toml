@@ -1,6 +1,6 @@
 [package]
 name = "hashdeep"
-version = "0.2.3"
+version = "0.3.0"
 authors = ["René Mayrhofer <rm@ins.jku.at>"]
 description = "Recursively compute file hashes over a tree"
 edition = '2021'
