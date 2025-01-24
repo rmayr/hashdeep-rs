@@ -109,19 +109,19 @@ fn main() {
 
     match args.hasher.as_str() {
         #[cfg(feature = "sha2")]
-        "sha2" => scan_dir::<sha2::Sha256>(&args.path, audit_map, args.compatoutput),
+        "sha2" => scan_dir::<sha2::Sha256>(&args.path, &mut audit_map, args.compatoutput),
 
         #[cfg(feature = "sha3")]
-        "sha3" => scan_dir::<sha3::Sha3_256>(&args.path, audit_map, args.compatoutput),
+        "sha3" => scan_dir::<sha3::Sha3_256>(&args.path, &mut audit_map, args.compatoutput),
 
         #[cfg(feature = "blake3")]
-        "blake3" => scan_dir::<blake3::Hasher>(&args.path, audit_map, args.compatoutput),
+        "blake3" => scan_dir::<blake3::Hasher>(&args.path, &mut audit_map, args.compatoutput),
 
         _ => panic!("unknown hash function")
     };
 }
 
-fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, FileEntry>>, compat_output: bool)
+fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<HashMap<String, FileEntry>>, compat_output: bool)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
@@ -141,12 +141,22 @@ fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, FileEntry>>
 
         let fhash = digest.finalize();
         match audit_map {
-            Some(ref _m) => {
-                /*if m.contains_key(&fhash.to_string()) {
-                    if (m.get(&fhash.to_string()).unwrap() != fname.display().to_string()) {
-                        println!("{}  {}  (mismatch)", fhash, fname.display());
+            Some(ref mut m) => {
+                #[cfg(feature = "audit")] {
+                    let h = format!("{:x}", fhash);
+                    if m.contains_key(h.as_str()) {
+                        let e = m.get_mut(h.as_str()).unwrap();
+                        // remember that we found a file with this hash
+                        e.present = true;
+                        if e.path != fname.display().to_string() {
+                            println!("{:x}  {}  (moved from {})", fhash, fname.display(), e.path);
+                        }
+                    } else {
+                        println!("{:x}  {}  (not found in audit map)", fhash, fname.display());
                     }
-                }*/
+
+                    // TODO: check is the path is present, but (at this point) with a different hash - that's the most important category
+                }
             },
             None => {
                 if compat_output {
@@ -154,6 +164,16 @@ fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, FileEntry>>
                              fname.canonicalize().expect("Failed to canonicalize path {}").display());
                 } else {
                     println!("{:x}  {}", fhash, fname.display());
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "audit")] {
+        if let Some(m) = audit_map {
+            for (h, e) in m.iter() {
+                if !e.present {
+                    println!("{}  {}  (not found in filesystem, but listed in audit map)", h, e.path);
                 }
             }
         }
