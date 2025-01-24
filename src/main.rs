@@ -12,8 +12,12 @@ extern crate sha3;
 #[cfg(feature = "blake3")]
 extern crate blake3;
 
+#[cfg(feature = "audit")]
+use regex::Regex;
+
 use std::collections::HashMap;
 use std::io::BufRead;
+use std::str::FromStr;
 use digest::Digest;
 use filebuffer::FileBuffer;
 use walkdir::WalkDir;
@@ -43,19 +47,65 @@ struct Args {
     compatoutput: bool,
 }
 
+/// Representation of a file in the audit map read from previous calls:
+#[derive(Debug)]
+struct FileEntry {
+    path: String,
+    present: bool,
+    size: usize,
+}
+
+impl FileEntry {
+    fn new(path: String) -> FileEntry {
+        FileEntry { path, present: false, size: 0 }
+    }
+
+    fn new_s(path: String, size: usize) -> FileEntry {
+        FileEntry { path, present: false, size }
+    }
+}
+
 fn main() {
     let args = Args::parse();
 
-    let mut audit_map: Option<HashMap<String, String>> = None;
+    // If we have an audit map parameter, then try to parse it - with error handling
+    let mut audit_map: Option<HashMap<String, FileEntry>> = None;
+    #[cfg(feature = "audit")] {
     if let Some(audit_file) = args.audit {
         println!("Reading hashes from {}", audit_file);
         let faudit = FileBuffer::open(&audit_file).expect(&format!("Failed to open file {}", audit_file).to_string());
-        let map: HashMap<String, String> = faudit.lines().map(|l| l.unwrap_or_default()
-                .split_once(char::is_whitespace).expect("Unable to split line {}, audit file is in invalid format")
-                .map(| (l, r) | (l.to_string(), r.to_string()))).collect();
-        println!("{:#?}", &map);
+        let mut map = HashMap::new();
+
+        for line in faudit.lines().map(|l| l.unwrap_or_default()) {
+            let re1 = Regex::new(r"^(?<hash>[[:xdigit:]]+)[[:space:]]+(?<file>.+)[[:space:]]*$");
+            let re2 = Regex::new(r"^(?<size>[[:digit:]]+),(?<hash>[[:xdigit:]]+),(?<file>.+)[[:space:]]*$");
+
+            if let Some(caps) = re1.unwrap().captures(line.as_str()) {
+                let hash = &caps["hash"];
+                let file = &caps["file"];
+                println!("Parsing audit file in format 1: {} -> {}", hash, file);
+                map.insert(hash.to_string(), FileEntry::new(file.to_string()));
+            }
+            else if let Some(caps) = re2.unwrap().captures(line.as_str()) {
+                let hash = &caps["hash"];
+                let file = &caps["file"];
+                let size = match usize::from_str(&caps["size"]) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        println!("Cannot parse {} into usize, setting to 0", &caps["size"]);
+                        0
+                    }
+                };
+                println!("Parsing audit file in format 2: {} -> {} with size {}", hash, file, size);
+                map.insert(hash.to_string(), FileEntry::new_s(hash.to_string(), size));
+            }
+            else {
+                println!("Failed to parse line {}", line);
+            }
+        }
+        //println!("{:#?}", &map);
         audit_map = Some(map);
-    }
+    }}
 
     match args.hasher.as_str() {
         #[cfg(feature = "sha2")]
@@ -71,7 +121,7 @@ fn main() {
     };
 }
 
-fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, String>>, compat_output: bool)
+fn scan_dir<D: Digest>(path: &str, audit_map: Option<HashMap<String, FileEntry>>, compat_output: bool)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
