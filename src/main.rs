@@ -12,6 +12,7 @@ use regex::Regex;
 
 use std::collections::HashMap;
 use std::io::BufRead;
+use std::rc::Rc;
 use std::str::FromStr;
 use digest::Digest;
 use filebuffer::FileBuffer;
@@ -52,41 +53,42 @@ struct FileEntry {
 }
 
 impl FileEntry {
-    fn new(hash: String, path: String) -> FileEntry {
-        FileEntry { hash, path, present: false, size: 0 }
+    fn new(hash: String, path: String) -> Rc<FileEntry> {
+        Rc::new(FileEntry { hash, path, present: false, size: 0 })
     }
 
-    fn new_s(hash: String, path: String, size: usize) -> FileEntry {
-        FileEntry { hash, path, present: false, size }
+    fn new_s(hash: String, path: String, size: usize) -> Rc<FileEntry> {
+        Rc::new(FileEntry { hash, path, present: false, size })
     }
 }
 
+/// Encapsulates FileEntry structs that were read from the audit file, indexed
+/// both by hash and by path.
 #[derive(Debug)]
-struct AuditMap {
-    by_hash: HashMap<String, usize>,
-    by_path: HashMap<String, usize>,
-    data: Vec<FileEntry>,
+struct AuditMap<'a> {
+    by_hash: HashMap<&'a str, usize>,
+    by_path: HashMap<&'a str, usize>,
+    data: Vec<Rc<FileEntry>>,
 }
 
-impl AuditMap {
-    fn new() -> AuditMap {
-        let mut by_hash: HashMap<String, usize> = HashMap::new();
-        let mut by_path: HashMap<String, usize> = HashMap::new();
-        let mut data: Vec<FileEntry> = Vec::new();
+impl<'a> AuditMap<'a> {
+    fn new() -> AuditMap<'a> {
+        let by_hash = HashMap::new();
+        let by_path = HashMap::new();
+        let data = Vec::new();
         AuditMap { by_hash, by_path, data }
     }
 
-    fn insert(&mut self, entry: FileEntry) {
-        // TODO: Maybe find a way to have the key strings as &str for memory efficiency, referring to the FileEntry fields?
-        let hash = entry.hash.clone();
-        let path = entry.path.clone();
+    fn insert(&mut self, entry: Rc<FileEntry>) {
+        let hash = Rc::clone(&entry).hash.as_str();
+        let path = Rc::clone(&entry).path.as_str();
 
         self.data.push(entry);
         self.by_hash.insert(hash, self.data.len());
         self.by_path.insert(path, self.data.len());
     }
 
-    fn get_by_hash(&mut self, hash: &str) -> Option<&mut FileEntry> {
+    fn get_by_hash(&mut self, hash: &str) -> Option<&mut Rc<FileEntry>> {
         if let Some(i) = self.by_hash.get(hash) {
             self.data.get_mut(*i)
         }
@@ -95,7 +97,7 @@ impl AuditMap {
         }
     }
 
-    fn get_by_path(&mut self, path: &str) -> Option<&mut FileEntry> {
+    fn get_by_path(&mut self, path: &str) -> Option<&mut Rc<FileEntry>> {
         if let Some(i) = self.by_path.get(path) {
             self.data.get_mut(*i)
         }
@@ -104,7 +106,7 @@ impl AuditMap {
         }
     }
 
-    fn iter(&self) -> impl Iterator<Item=&FileEntry> {
+    fn iter(&self) -> impl Iterator<Item=&Rc<FileEntry>> {
         self.data.iter()
     }
 }
@@ -128,7 +130,7 @@ fn main() {
         for line in faudit.lines().map(|l| l.unwrap_or_default()) {
             let re1 = Regex::new(r"^(?<hash>[[:xdigit:]]+)[[:space:]]+(?<file>.+)[[:space:]]*$");
             let re2 = Regex::new(r"^(?<size>[[:digit:]]+),(?<hash>[[:xdigit:]]+),(?<file>.+)[[:space:]]*$");
-            let mut entry: Option<FileEntry> = None;
+            let mut entry = None;
 
             if let Some(caps) = re1.unwrap().captures(line.as_str()) {
                 let hash = &caps["hash"];
@@ -199,7 +201,7 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
         match audit_map {
             Some(ref mut m) => {
                 #[cfg(feature = "audit")] {
-                    if let Some(mut e) = m.get_by_hash(h.as_str()) {
+                    if let Some(e) = m.get_by_hash(h.as_str()) {
                         // remember that we found a file with this hash
                         e.present = true;
                         if e.path == n {
@@ -208,13 +210,13 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
                         else {
                             println!("{}  {}  (MOVED from {})", h, n, e.path);
                         }
-                    } else if let Some(mut e) = m.get_by_path(n.as_str()) {
+                    } else if let Some(e) = m.get_by_path(n.as_str()) {
                         e.present = true;
                         if e.hash != h {
                             println!("{}  {}  (CHANGED hash from {})", h, n, e.hash);
                         }
                         else {
-                            panic!("Found a duplicate hash/path combination after checking for that case - this shouldn't happen");;
+                            panic!("Found a duplicate hash/path combination after checking for that case - this shouldn't happen");
                         }
                     } else {
                         println!("{}  {}  (NEW, not found in audit map)", h, n);
@@ -234,10 +236,8 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
 
     #[cfg(feature = "audit")] {
         if let Some(m) = audit_map {
-            for e in m.iter() {
-                if !e.present {
-                    println!("{}  {}  (MISSING in filesystem, but listed in audit map)", e.hash, e.path);
-                }
+            for e in m.iter().filter(|e| !e.present) {
+                println!("{}  {}  (MISSING in filesystem, but listed in audit map)", e.hash, e.path);
             }
         }
     }
