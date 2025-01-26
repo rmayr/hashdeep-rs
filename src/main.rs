@@ -1,8 +1,3 @@
-extern crate digest;
-extern crate walkdir;
-extern crate filebuffer;
-extern crate clap;
-
 #[cfg(feature = "sha2")]
 extern crate sha2;
 
@@ -17,7 +12,6 @@ use regex::Regex;
 
 use std::collections::HashMap;
 use std::io::BufRead;
-use std::rc::Rc;
 use std::str::FromStr;
 use digest::Digest;
 use filebuffer::FileBuffer;
@@ -187,12 +181,12 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
 
     // TODO: parallelize for efficiency, but keep ordering for output, see e.g. https://users.rust-lang.org/t/whats-the-fastest-way-to-read-a-lot-of-files/39743/10
     for entry in WalkDir::new(path).sort_by_file_name().into_iter().filter_map(|e| e.ok()) {
-        let fname = entry.path();
-        if ! fname.is_file() {
+        let file = entry.path();
+        if ! file.is_file() {
             continue;
         }
 
-        let fbuf = FileBuffer::open(&fname).expect(&format!("Failed to open file {}", fname.display()).to_string());
+        let fbuf = FileBuffer::open(&file).expect(&format!("Failed to open file {}", file.display()).to_string());
 
         // this may not be optimal from a performance point of view, but reset is problematic with re-using the digest in the generic case
         let mut digest = D::new();
@@ -200,29 +194,39 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
         digest.update(&fbuf);
 
         let fhash = digest.finalize();
+        let h = format!("{:x}", fhash);
+        let n = file.display().to_string();
         match audit_map {
             Some(ref mut m) => {
                 #[cfg(feature = "audit")] {
-                    let h = format!("{:x}", fhash);
                     if let Some(mut e) = m.get_by_hash(h.as_str()) {
                         // remember that we found a file with this hash
                         e.present = true;
-                        if e.path != fname.display().to_string() {
-                            println!("{:x}  {}  (moved from {})", fhash, fname.display(), e.path);
+                        if e.path == n {
+                            println!("{} -> {}  (OK)", h, n);
+                        }
+                        else {
+                            println!("{}  {}  (MOVED from {})", h, n, e.path);
+                        }
+                    } else if let Some(mut e) = m.get_by_path(n.as_str()) {
+                        e.present = true;
+                        if e.hash != h {
+                            println!("{}  {}  (CHANGED hash from {})", h, n, e.hash);
+                        }
+                        else {
+                            panic!("Found a duplicate hash/path combination after checking for that case - this shouldn't happen");;
                         }
                     } else {
-                        println!("{:x}  {}  (not found in audit map)", fhash, fname.display());
+                        println!("{}  {}  (NEW, not found in audit map)", h, n);
                     }
-
-                    // TODO: check is the path is present, but (at this point) with a different hash - that's the most important category
                 }
             },
             None => {
                 if compat_output {
-                    println!("{},{:x},{}", fname.metadata().expect("Failed to get file metadata of {}").len(), fhash,
-                             fname.canonicalize().expect("Failed to canonicalize path {}").display());
+                    println!("{},{},{}", file.metadata().expect("Failed to get file metadata of {}").len(), h,
+                             file.canonicalize().expect("Failed to canonicalize path {}").display());
                 } else {
-                    println!("{:x}  {}", fhash, fname.display());
+                    println!("{}  {}", h, n);
                 }
             }
         }
@@ -232,7 +236,7 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
         if let Some(m) = audit_map {
             for e in m.iter() {
                 if !e.present {
-                    println!("{}  {}  (not found in filesystem, but listed in audit map)", e.hash, e.path);
+                    println!("{}  {}  (MISSING in filesystem, but listed in audit map)", e.hash, e.path);
                 }
             }
         }
