@@ -17,6 +17,7 @@ use regex::Regex;
 
 use std::collections::HashMap;
 use std::io::BufRead;
+use std::rc::Rc;
 use std::str::FromStr;
 use digest::Digest;
 use filebuffer::FileBuffer;
@@ -50,41 +51,96 @@ struct Args {
 /// Representation of a file in the audit map read from previous calls:
 #[derive(Debug)]
 struct FileEntry {
+    hash: String,
     path: String,
     present: bool,
     size: usize,
 }
 
 impl FileEntry {
-    fn new(path: String) -> FileEntry {
-        FileEntry { path, present: false, size: 0 }
+    fn new(hash: String, path: String) -> FileEntry {
+        FileEntry { hash, path, present: false, size: 0 }
     }
 
-    fn new_s(path: String, size: usize) -> FileEntry {
-        FileEntry { path, present: false, size }
+    fn new_s(hash: String, path: String, size: usize) -> FileEntry {
+        FileEntry { hash, path, present: false, size }
+    }
+}
+
+#[derive(Debug)]
+struct AuditMap {
+    by_hash: HashMap<String, usize>,
+    by_path: HashMap<String, usize>,
+    data: Vec<FileEntry>,
+}
+
+impl AuditMap {
+    fn new() -> AuditMap {
+        let mut by_hash: HashMap<String, usize> = HashMap::new();
+        let mut by_path: HashMap<String, usize> = HashMap::new();
+        let mut data: Vec<FileEntry> = Vec::new();
+        AuditMap { by_hash, by_path, data }
+    }
+
+    fn insert(&mut self, entry: FileEntry) {
+        // TODO: Maybe find a way to have the key strings as &str for memory efficiency, referring to the FileEntry fields?
+        let hash = entry.hash.clone();
+        let path = entry.path.clone();
+
+        self.data.push(entry);
+        self.by_hash.insert(hash, self.data.len());
+        self.by_path.insert(path, self.data.len());
+    }
+
+    fn get_by_hash(&mut self, hash: &str) -> Option<&mut FileEntry> {
+        if let Some(i) = self.by_hash.get(hash) {
+            self.data.get_mut(*i)
+        }
+        else {
+            None
+        }
+    }
+
+    fn get_by_path(&mut self, path: &str) -> Option<&mut FileEntry> {
+        if let Some(i) = self.by_path.get(path) {
+            self.data.get_mut(*i)
+        }
+        else {
+            None
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item=&FileEntry> {
+        self.data.iter()
     }
 }
 
 fn main() {
     let args = Args::parse();
 
-    // If we have an audit map parameter, then try to parse it - with error handling
-    let mut audit_map: Option<HashMap<String, FileEntry>> = None;
+    /* If we have an audit map parameter, then try to parse it - with error handling.
+       For efficiency during the later file system traversal, construct two maps: one
+       indexed by path, ony by hash.
+       This uses Rcs because we want to have the same FileEntry sructs referenced
+       from both index maps and be able to, e.g., update the present bool only once in
+       addition to efficient deduplicated memory handling. */
+    let mut audit_map: Option<AuditMap> = None;
     #[cfg(feature = "audit")] {
     if let Some(audit_file) = args.audit {
         println!("Reading hashes from {}", audit_file);
         let faudit = FileBuffer::open(&audit_file).expect(&format!("Failed to open file {}", audit_file).to_string());
-        let mut map = HashMap::new();
+        let mut map = AuditMap::new();
 
         for line in faudit.lines().map(|l| l.unwrap_or_default()) {
             let re1 = Regex::new(r"^(?<hash>[[:xdigit:]]+)[[:space:]]+(?<file>.+)[[:space:]]*$");
             let re2 = Regex::new(r"^(?<size>[[:digit:]]+),(?<hash>[[:xdigit:]]+),(?<file>.+)[[:space:]]*$");
+            let mut entry: Option<FileEntry> = None;
 
             if let Some(caps) = re1.unwrap().captures(line.as_str()) {
                 let hash = &caps["hash"];
                 let file = &caps["file"];
                 println!("Parsing audit file in format 1: {} -> {}", hash, file);
-                map.insert(hash.to_string(), FileEntry::new(file.to_string()));
+                entry = Some(FileEntry::new(hash.to_string(), file.to_string()));
             }
             else if let Some(caps) = re2.unwrap().captures(line.as_str()) {
                 let hash = &caps["hash"];
@@ -97,10 +153,14 @@ fn main() {
                     }
                 };
                 println!("Parsing audit file in format 2: {} -> {} with size {}", hash, file, size);
-                map.insert(hash.to_string(), FileEntry::new_s(hash.to_string(), size));
+                entry = Some(FileEntry::new_s(hash.to_string(), file.to_string(), size));
             }
             else {
                 println!("Failed to parse line {}", line);
+            }
+
+            if let Some(e) = entry {
+                map.insert(e);
             }
         }
         //println!("{:#?}", &map);
@@ -121,7 +181,7 @@ fn main() {
     };
 }
 
-fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<HashMap<String, FileEntry>>, compat_output: bool)
+fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_output: bool)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
@@ -144,8 +204,7 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<HashMap<String, FileEn
             Some(ref mut m) => {
                 #[cfg(feature = "audit")] {
                     let h = format!("{:x}", fhash);
-                    if m.contains_key(h.as_str()) {
-                        let e = m.get_mut(h.as_str()).unwrap();
+                    if let Some(mut e) = m.get_by_hash(h.as_str()) {
                         // remember that we found a file with this hash
                         e.present = true;
                         if e.path != fname.display().to_string() {
@@ -171,9 +230,9 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<HashMap<String, FileEn
 
     #[cfg(feature = "audit")] {
         if let Some(m) = audit_map {
-            for (h, e) in m.iter() {
+            for e in m.iter() {
                 if !e.present {
-                    println!("{}  {}  (not found in filesystem, but listed in audit map)", h, e.path);
+                    println!("{}  {}  (not found in filesystem, but listed in audit map)", e.hash, e.path);
                 }
             }
         }
