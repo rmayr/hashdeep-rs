@@ -48,7 +48,7 @@ struct FileEntry {
     hash: String,
     path: String,
     present: bool,
-    size: usize,
+    size: u64,
 }
 
 impl FileEntry {
@@ -56,7 +56,7 @@ impl FileEntry {
         FileEntry { hash, path, present: false, size: 0 }
     }
 
-    fn new_s(hash: String, path: String, size: usize) -> FileEntry {
+    fn new_s(hash: String, path: String, size: u64) -> FileEntry {
         FileEntry { hash, path, present: false, size }
     }
 }
@@ -131,7 +131,7 @@ fn main() {
             else {
                 let p: Vec<&str> = line.split(',').collect();
                 if p.len() == 3 {
-                    let size = match usize::from_str(p[0]) {
+                    let size = match u64::from_str(p[0]) {
                         Ok(s) => s,
                         Err(_) => {
                             println!("Cannot parse {} into usize, setting to 0", p[0]);
@@ -194,11 +194,18 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
         match audit_map {
             Some(ref mut m) => {
                 #[cfg(feature = "audit")] {
+                    let size = file.metadata().expect("Failed to get file metadata of {}").len();
+
                     if let Some(e) = m.get_by_hash(h.as_str()) {
                         // remember that we found a file with this hash
                         e.present = true;
                         if e.path == n {
-                            println!("{} -> {}  ({})", h, n, "OK".green());
+                            if e.size == 0 || e.size == size {
+                                println!("{} -> {}  ({})", h, n, "OK".green());
+                            }
+                            else {
+                                println!("{} -> {}  ({} from {} to {})", h, n, "CHANGED SIZE".red(), e.size, size);
+                            }
                         }
                         else {
                             println!("{}  {}  ({} from {})", h, n, "MOVED".blue(), e.path);
@@ -212,7 +219,7 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
                             panic!("Found a duplicate hash/path combination after checking for that case - this shouldn't happen");
                         }
                     } else {
-                        println!("{}  {}  ({} in filesystem)", h, n, "NEW".yellow());
+                        println!("{}  {}  ({} in filesystem with size {})", h, n, "NEW".yellow(), size);
                     }
                 }
             },
@@ -230,7 +237,12 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
     #[cfg(feature = "audit")] {
         if let Some(m) = audit_map {
             for e in m.iter().filter(|e| !e.present) {
-                println!("{}  {}  ({} in filesystem)", e.hash, e.path, "MISSING".magenta());
+                if e.size != 0 {
+                    println!("{}  {}  ({} in filesystem with expected size {})", e.hash, e.path, "MISSING".magenta(), e.size);
+                }
+                else {
+                    println!("{}  {}  ({} in filesystem)", e.hash, e.path, "MISSING".magenta());
+                }
             }
         }
     }
