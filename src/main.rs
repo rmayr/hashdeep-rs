@@ -9,10 +9,13 @@ extern crate blake3;
 
 #[cfg(feature = "audit")]
 use colored::Colorize;
-
-use std::collections::HashMap;
+#[cfg(feature = "audit")]
 use std::io::BufRead;
+#[cfg(feature = "audit")]
+use std::collections::HashMap;
+#[cfg(feature = "audit")]
 use std::str::FromStr;
+
 use digest::Digest;
 use filebuffer::FileBuffer;
 use walkdir::WalkDir;
@@ -42,6 +45,7 @@ struct Args {
     compatoutput: bool,
 }
 
+#[cfg(feature = "audit")]
 /// Representation of a file in the audit map read from previous calls:
 #[derive(Debug)]
 struct FileEntry {
@@ -51,6 +55,7 @@ struct FileEntry {
     size: u64,
 }
 
+#[cfg(feature = "audit")]
 impl FileEntry {
     fn new(hash: String, path: String) -> FileEntry {
         FileEntry { hash, path, present: false, size: 0 }
@@ -61,6 +66,7 @@ impl FileEntry {
     }
 }
 
+#[cfg(feature = "audit")]
 /// Encapsulates FileEntry structs that were read from the audit file, indexed
 /// both by hash and by path.
 #[derive(Debug)]
@@ -69,7 +75,10 @@ struct AuditMap {
     by_path: HashMap<String, usize>,
     data: Vec<FileEntry>,
 }
+#[cfg(not(feature = "audit"))]
+struct AuditMap {}
 
+#[cfg(feature = "audit")]
 impl AuditMap {
     fn new() -> AuditMap {
         let by_hash = HashMap::new();
