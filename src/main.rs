@@ -12,7 +12,6 @@ use regex::Regex;
 
 use std::collections::HashMap;
 use std::io::BufRead;
-use std::rc::Rc;
 use std::str::FromStr;
 use digest::Digest;
 use filebuffer::FileBuffer;
@@ -53,42 +52,43 @@ struct FileEntry {
 }
 
 impl FileEntry {
-    fn new(hash: String, path: String) -> Rc<FileEntry> {
-        Rc::new(FileEntry { hash, path, present: false, size: 0 })
+    fn new(hash: String, path: String) -> FileEntry {
+        FileEntry { hash, path, present: false, size: 0 }
     }
 
-    fn new_s(hash: String, path: String, size: usize) -> Rc<FileEntry> {
-        Rc::new(FileEntry { hash, path, present: false, size })
+    fn new_s(hash: String, path: String, size: usize) -> FileEntry {
+        FileEntry { hash, path, present: false, size }
     }
 }
 
 /// Encapsulates FileEntry structs that were read from the audit file, indexed
 /// both by hash and by path.
 #[derive(Debug)]
-struct AuditMap<'a> {
-    by_hash: HashMap<&'a str, usize>,
-    by_path: HashMap<&'a str, usize>,
-    data: Vec<Rc<FileEntry>>,
+struct AuditMap {
+    by_hash: HashMap<String, usize>,
+    by_path: HashMap<String, usize>,
+    data: Vec<FileEntry>,
 }
 
-impl<'a> AuditMap<'a> {
-    fn new() -> AuditMap<'a> {
+impl AuditMap {
+    fn new() -> AuditMap {
         let by_hash = HashMap::new();
         let by_path = HashMap::new();
         let data = Vec::new();
         AuditMap { by_hash, by_path, data }
     }
 
-    fn insert(&mut self, entry: Rc<FileEntry>) {
-        let hash = Rc::clone(&entry).hash.as_str();
-        let path = Rc::clone(&entry).path.as_str();
+    fn insert(&mut self, entry: FileEntry) {
+        // TODO: could these strings be &str referencing to the entry stored in the Vec to save some memory?
+        let hash = entry.hash.clone();
+        let path = entry.path.clone();
 
         self.data.push(entry);
-        self.by_hash.insert(hash, self.data.len());
-        self.by_path.insert(path, self.data.len());
+        self.by_hash.insert(hash, self.data.len()-1);
+        self.by_path.insert(path, self.data.len()-1);
     }
 
-    fn get_by_hash(&mut self, hash: &str) -> Option<&mut Rc<FileEntry>> {
+    fn get_by_hash(&mut self, hash: &str) -> Option<&mut FileEntry> {
         if let Some(i) = self.by_hash.get(hash) {
             self.data.get_mut(*i)
         }
@@ -97,7 +97,7 @@ impl<'a> AuditMap<'a> {
         }
     }
 
-    fn get_by_path(&mut self, path: &str) -> Option<&mut Rc<FileEntry>> {
+    fn get_by_path(&mut self, path: &str) -> Option<&mut FileEntry> {
         if let Some(i) = self.by_path.get(path) {
             self.data.get_mut(*i)
         }
@@ -106,7 +106,7 @@ impl<'a> AuditMap<'a> {
         }
     }
 
-    fn iter(&self) -> impl Iterator<Item=&Rc<FileEntry>> {
+    fn iter(&self) -> impl Iterator<Item=&FileEntry> {
         self.data.iter()
     }
 }
@@ -114,12 +114,6 @@ impl<'a> AuditMap<'a> {
 fn main() {
     let args = Args::parse();
 
-    /* If we have an audit map parameter, then try to parse it - with error handling.
-       For efficiency during the later file system traversal, construct two maps: one
-       indexed by path, ony by hash.
-       This uses Rcs because we want to have the same FileEntry sructs referenced
-       from both index maps and be able to, e.g., update the present bool only once in
-       addition to efficient deduplicated memory handling. */
     let mut audit_map: Option<AuditMap> = None;
     #[cfg(feature = "audit")] {
     if let Some(audit_file) = args.audit {
@@ -135,7 +129,7 @@ fn main() {
             if let Some(caps) = re1.unwrap().captures(line.as_str()) {
                 let hash = &caps["hash"];
                 let file = &caps["file"];
-                println!("Parsing audit file in format 1: {} -> {}", hash, file);
+                //println!("Parsing audit file in format 1: {} -> {}", hash, file);
                 entry = Some(FileEntry::new(hash.to_string(), file.to_string()));
             }
             else if let Some(caps) = re2.unwrap().captures(line.as_str()) {
@@ -148,7 +142,7 @@ fn main() {
                         0
                     }
                 };
-                println!("Parsing audit file in format 2: {} -> {} with size {}", hash, file, size);
+                //println!("Parsing audit file in format 2: {} -> {} with size {}", hash, file, size);
                 entry = Some(FileEntry::new_s(hash.to_string(), file.to_string(), size));
             }
             else {
