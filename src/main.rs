@@ -162,7 +162,13 @@ fn main() {
             }
 
             if let Some(e) = entry {
-                map.insert(e);
+                // TODO: Decide if this is the right thing to do to ignore duplicate hashes - probably not, should index on hash+path instead
+                if let Some(e2) = map.get_by_hash(e.hash.as_str()) {
+                    println!("{}  {}  ({} hash with {})", e.hash, e.path, "DUPLICATE".blue(), e2.path);
+                }
+                else {
+                    map.insert(e);
+                }
             }
         }
         //println!("{:#?}", &map);
