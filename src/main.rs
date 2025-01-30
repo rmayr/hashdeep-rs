@@ -9,6 +9,8 @@ extern crate blake3;
 
 #[cfg(feature = "audit")]
 use regex::Regex;
+#[cfg(feature = "audit")]
+use colored::Colorize;
 
 use std::collections::HashMap;
 use std::io::BufRead;
@@ -199,21 +201,21 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
                         // remember that we found a file with this hash
                         e.present = true;
                         if e.path == n {
-                            println!("{} -> {}  (OK)", h, n);
+                            println!("{} -> {}  ({})", h, n, "OK".green());
                         }
                         else {
-                            println!("{}  {}  (MOVED from {})", h, n, e.path);
+                            println!("{}  {}  ({} from {})", h, n, "MOVED".blue(), e.path);
                         }
                     } else if let Some(e) = m.get_by_path(n.as_str()) {
                         e.present = true;
                         if e.hash != h {
-                            println!("{}  {}  (CHANGED hash from {})", h, n, e.hash);
+                            println!("{}  {}  ({} hash from {})", h, n, "CHANGED".red(), e.hash);
                         }
                         else {
                             panic!("Found a duplicate hash/path combination after checking for that case - this shouldn't happen");
                         }
                     } else {
-                        println!("{}  {}  (NEW, not found in audit map)", h, n);
+                        println!("{}  {}  ({} in filesystem)", h, n, "NEW".yellow());
                     }
                 }
             },
@@ -231,7 +233,7 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
     #[cfg(feature = "audit")] {
         if let Some(m) = audit_map {
             for e in m.iter().filter(|e| !e.present) {
-                println!("{}  {}  (MISSING in filesystem, but listed in audit map)", e.hash, e.path);
+                println!("{}  {}  ({} in filesystem)", e.hash, e.path, "MISSING".magenta());
             }
         }
     }
