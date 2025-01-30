@@ -8,8 +8,6 @@ extern crate sha3;
 extern crate blake3;
 
 #[cfg(feature = "audit")]
-use regex::Regex;
-#[cfg(feature = "audit")]
 use colored::Colorize;
 
 use std::collections::HashMap;
@@ -124,31 +122,30 @@ fn main() {
         let mut map = AuditMap::new();
 
         for line in faudit.lines().map(|l| l.unwrap_or_default()) {
-            let re1 = Regex::new(r"^(?<hash>[[:xdigit:]]+)[[:space:]]+(?<file>.+)[[:space:]]*$");
-            let re2 = Regex::new(r"^(?<size>[[:digit:]]+),(?<hash>[[:xdigit:]]+),(?<file>.+)[[:space:]]*$");
             let mut entry = None;
 
-            if let Some(caps) = re1.unwrap().captures(line.as_str()) {
-                let hash = &caps["hash"];
-                let file = &caps["file"];
-                //println!("Parsing audit file in format 1: {} -> {}", hash, file);
-                entry = Some(FileEntry::new(hash.to_string(), file.to_string()));
-            }
-            else if let Some(caps) = re2.unwrap().captures(line.as_str()) {
-                let hash = &caps["hash"];
-                let file = &caps["file"];
-                let size = match usize::from_str(&caps["size"]) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        println!("Cannot parse {} into usize, setting to 0", &caps["size"]);
-                        0
-                    }
-                };
-                //println!("Parsing audit file in format 2: {} -> {} with size {}", hash, file, size);
-                entry = Some(FileEntry::new_s(hash.to_string(), file.to_string(), size));
+            if let Some((hash, file)) = line.split_once(char::is_whitespace) {
+                println!("Parsing audit file in format 1: {} -> {}", hash.trim(), file.trim());
+                entry = Some(FileEntry::new(hash.trim().to_string(), file.trim().to_string()));
             }
             else {
-                println!("Failed to parse line {}", line);
+                let p: Vec<&str> = line.split(',').collect();
+                if p.len() == 3 {
+                    let size = match usize::from_str(p[0]) {
+                        Ok(s) => s,
+                        Err(_) => {
+                            println!("Cannot parse {} into usize, setting to 0", p[0]);
+                            0
+                        }
+                    };
+                    let hash = p[1].trim();
+                    let file = p[2].trim();
+                    println!("Parsing audit file in format 2: {} -> {} with size {}", hash, file, size);
+                    entry = Some(FileEntry::new_s(hash.to_string(), file.to_string(), size));
+                }
+                else {
+                    println!("Failed to parse line {}", line);
+                }
             }
 
             if let Some(e) = entry {

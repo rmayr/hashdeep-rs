@@ -5,13 +5,15 @@ authors = ["René Mayrhofer <rm@ins.jku.at>"]
 description = "Recursively compute file hashes over a tree"
 edition = '2021'
 license = "Apache 2.0"
+homepage = "https://github.com/rmayr/hashdeep-rs"
+readme = "README.md"
 
 [features]
 default = ["blake3", "sha2", "sha3", "audit"]
 blake3 = ["dep:blake3"]
 sha2 = ["dep:sha2"]
 sha3 = ["dep:sha3"]
-audit = ["dep:regex", "dep:colored"]
+audit = ["dep:colored"]
 
 [dependencies]
 walkdir = "^2"
@@ -21,7 +23,6 @@ sha3 = { version = "^0.10", optional = true }
 blake3 = { version = "^1.5", features = ["traits-preview"], optional = true }
 filebuffer = "^0.4"
 clap = { version = "^4", default-features = false, features = ["std", "help", "cargo", "derive"] }
-regex = {  version = "1.11", optional = true }
 colored = {  version = "2", optional = true }
 
 # optimize for binary size, see e.g. https://arusahni.net/blog/2020/03/optimizing-rust-binary-size.html
