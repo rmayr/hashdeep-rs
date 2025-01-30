@@ -16,9 +16,13 @@ use std::collections::HashMap;
 #[cfg(feature = "audit")]
 use std::str::FromStr;
 
+#[cfg(feature = "parallel")]
+use jwalk::WalkDir;
+#[cfg(not(feature = "parallel"))]
+use walkdir::WalkDir;
+
 use digest::Digest;
 use filebuffer::FileBuffer;
-use walkdir::WalkDir;
 use clap::Parser;
 
 #[derive(Parser)]
@@ -134,7 +138,7 @@ fn main() {
             let mut entry = None;
 
             if let Some((hash, file)) = line.split_once(char::is_whitespace) {
-                println!("Parsing audit file in format 1: {} -> {}", hash.trim(), file.trim());
+                //println!("Parsing audit file in format 1: {} -> {}", hash.trim(), file.trim());
                 entry = Some(FileEntry::new(hash.trim().to_string(), file.trim().to_string()));
             }
             else {
@@ -149,7 +153,7 @@ fn main() {
                     };
                     let hash = p[1].trim();
                     let file = p[2].trim();
-                    println!("Parsing audit file in format 2: {} -> {} with size {}", hash, file, size);
+                    //println!("Parsing audit file in format 2: {} -> {} with size {}", hash, file, size);
                     entry = Some(FileEntry::new_s(hash.to_string(), file.to_string(), size));
                 }
                 else {
@@ -183,8 +187,13 @@ fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_outp
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
-    // TODO: parallelize for efficiency, but keep ordering for output, see e.g. https://users.rust-lang.org/t/whats-the-fastest-way-to-read-a-lot-of-files/39743/10
-    for entry in WalkDir::new(path).sort_by_file_name().into_iter().filter_map(|e| e.ok()) {
+    // TODO: Find a way to sort the output in the same way the single-threaded walkdir does.
+    #[cfg(feature = "parallel")]
+    let dir_iter = WalkDir::new(path).sort(true).into_iter();
+    #[cfg(not(feature = "parallel"))]
+    let dir_iter = WalkDir::new(path).sort_by_file_name().into_iter();
+
+    for entry in dir_iter.filter_map(|e| e.ok()) {
         let file = entry.path();
         if ! file.is_file() {
             continue;
