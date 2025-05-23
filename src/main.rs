@@ -189,72 +189,162 @@ fn main() {
     };
 }
 
+// Helper struct to store file information for sorting
+#[cfg(feature = "parallel")]
+struct FileInfo {
+    path: String,
+    hash: String,
+    size: Option<u64>, // Conditionally populated
+    canonical_path: Option<String>, // Conditionally populated for compat_output
+}
+
+// Helper function to process a file entry (audit/print)
+fn process_file_entry(
+    file_path_str: &str,
+    hash_str: &str,
+    current_file_size_opt: Option<u64>,
+    canonical_file_path_opt: Option<&str>, // Changed to Option<&str>
+    audit_map: &mut Option<AuditMap>,
+    compat_output: bool,
+) {
+    match audit_map {
+        Some(ref mut m) => {
+            #[cfg(feature = "audit")] {
+                let current_file_size = current_file_size_opt.expect("Size should be present for audit");
+                if let Some(e) = m.get_by_hash(hash_str) {
+                    e.present = true;
+                    if e.path == file_path_str {
+                        if e.size == 0 || e.size == current_file_size {
+                            println!("{} -> {}  ({})", hash_str, file_path_str, "OK".green());
+                        } else {
+                            println!("{} -> {}  ({} from {} to {})", hash_str, file_path_str, "CHANGED SIZE".red(), e.size, current_file_size);
+                        }
+                    } else {
+                        println!("{}  {}  ({} from {})", hash_str, file_path_str, "MOVED".blue(), e.path);
+                    }
+                } else if let Some(e) = m.get_by_path(file_path_str) {
+                    e.present = true;
+                    if e.hash != hash_str {
+                        println!("{}  {}  ({} hash from {})", hash_str, file_path_str, "CHANGED".red(), e.hash);
+                    } else {
+                        panic!("Found a duplicate hash/path combination after checking for that case - this shouldn't happen");
+                    }
+                } else {
+                    println!("{}  {}  ({} in filesystem with size {})", hash_str, file_path_str, "NEW".yellow(), current_file_size);
+                }
+            }
+            #[cfg(not(feature = "audit"))] {
+                // This case should ideally not be hit if audit_map is Some but audit feature is off.
+                // However, to be safe and print something:
+                if compat_output {
+                     println!("{},{},{}", current_file_size_opt.expect("Size for compat"), hash_str, canonical_file_path_opt.expect("Canon path for compat"));
+                } else {
+                    println!("{}  {}", hash_str, file_path_str);
+                }
+            }
+        },
+        None => {
+            if compat_output {
+                println!("{},{},{}", current_file_size_opt.expect("Size should be present for compat_output"), hash_str, canonical_file_path_opt.expect("Canonical path should be present for compat_output"));
+            } else {
+                println!("{}  {}", hash_str, file_path_str);
+            }
+        }
+    }
+}
+
+
 fn scan_dir<D: Digest>(path: &str, audit_map: &mut Option<AuditMap>, compat_output: bool)
         where D::OutputSize: std::ops::Add,
               <D::OutputSize as std::ops::Add>::Output: digest::generic_array::ArrayLength<u8> {
 
-    // TODO: Find a way to sort the output in the same way the single-threaded walkdir does.
     #[cfg(feature = "parallel")]
-    let dir_iter = WalkDir::new(path).sort(true).into_iter();
-    #[cfg(not(feature = "parallel"))]
-    let dir_iter = WalkDir::new(path).sort_by_file_name().into_iter();
+    {
+        let dir_iter = WalkDir::new(path).sort(true).into_iter();
+        let mut file_infos: Vec<FileInfo> = Vec::new();
 
-    for entry in dir_iter.filter_map(|e| e.ok()) {
-        let file = entry.path();
-        if ! file.is_file() {
-            continue;
+        for entry in dir_iter.filter_map(|e| e.ok()) {
+            let file_path = entry.path();
+            if !file_path.is_file() {
+                continue;
+            }
+
+            let fbuf = FileBuffer::open(&file_path).expect(&format!("Failed to open file {}", file_path.display()).to_string());
+            let mut digest = D::new();
+            digest.update(&fbuf);
+            let fhash = digest.finalize();
+            let h = format!("{:x}", fhash);
+            let n = file_path.display().to_string();
+
+            let mut file_size: Option<u64> = None;
+            if compat_output || audit_map.is_some() {
+                file_size = Some(file_path.metadata().expect("Failed to get file metadata for size").len());
+            }
+
+            let mut canon_path_str_opt: Option<String> = None;
+            if compat_output {
+                canon_path_str_opt = Some(file_path.canonicalize().expect("Failed to canonicalize path").display().to_string());
+            }
+            
+            file_infos.push(FileInfo { path: n, hash: h, size: file_size, canonical_path: canon_path_str_opt });
         }
 
-        let fbuf = FileBuffer::open(&file).expect(&format!("Failed to open file {}", file.display()).to_string());
+        file_infos.sort_by(|a, b| a.path.cmp(&b.path));
 
-        // this may not be optimal from a performance point of view, but reset is problematic with re-using the digest in the generic case
-        let mut digest = D::new();
-        //Digest::reset(&mut digest);
-        digest.update(&fbuf);
+        for info in file_infos {
+            process_file_entry(
+                &info.path,
+                &info.hash,
+                info.size,
+                info.canonical_path.as_deref(),
+                audit_map,
+                compat_output,
+            );
+        }
+    }
 
-        let fhash = digest.finalize();
-        let h = format!("{:x}", fhash);
-        let n = file.display().to_string();
-        match audit_map {
-            Some(ref mut m) => {
-                #[cfg(feature = "audit")] {
-                    let size = file.metadata().expect("Failed to get file metadata of {}").len();
-
-                    if let Some(e) = m.get_by_hash(h.as_str()) {
-                        // remember that we found a file with this hash
-                        e.present = true;
-                        if e.path == n {
-                            if e.size == 0 || e.size == size {
-                                println!("{} -> {}  ({})", h, n, "OK".green());
-                            }
-                            else {
-                                println!("{} -> {}  ({} from {} to {})", h, n, "CHANGED SIZE".red(), e.size, size);
-                            }
-                        }
-                        else {
-                            println!("{}  {}  ({} from {})", h, n, "MOVED".blue(), e.path);
-                        }
-                    } else if let Some(e) = m.get_by_path(n.as_str()) {
-                        e.present = true;
-                        if e.hash != h {
-                            println!("{}  {}  ({} hash from {})", h, n, "CHANGED".red(), e.hash);
-                        }
-                        else {
-                            panic!("Found a duplicate hash/path combination after checking for that case - this shouldn't happen");
-                        }
-                    } else {
-                        println!("{}  {}  ({} in filesystem with size {})", h, n, "NEW".yellow(), size);
-                    }
-                }
-            },
-            None => {
-                if compat_output {
-                    println!("{},{},{}", file.metadata().expect("Failed to get file metadata of {}").len(), h,
-                             file.canonicalize().expect("Failed to canonicalize path {}").display());
-                } else {
-                    println!("{}  {}", h, n);
-                }
+    #[cfg(not(feature = "parallel"))]
+    {
+        let dir_iter = walkdir::WalkDir::new(path).sort_by_file_name().into_iter();
+        for entry in dir_iter.filter_map(|e| e.ok()) {
+            let file = entry.path();
+            if ! file.is_file() {
+                continue;
             }
+
+            let fbuf = FileBuffer::open(&file).expect(&format!("Failed to open file {}", file.display()).to_string());
+            let mut digest = D::new();
+            digest.update(&fbuf);
+            let fhash = digest.finalize();
+            let h = format!("{:x}", fhash);
+            let n = file.display().to_string();
+
+            let mut current_file_size_opt: Option<u64> = None;
+            if compat_output || audit_map.is_some() {
+                current_file_size_opt = Some(file.metadata().expect("Failed to get file metadata for size").len());
+            }
+
+            let canonical_path_holder: Option<String>; // To hold the String if canonicalized
+            let mut canonical_path_display_opt: Option<&str> = None;
+            if compat_output {
+                let canon_path = file.canonicalize().expect("Failed to canonicalize path {}").display().to_string();
+                canonical_path_holder = Some(canon_path);
+                canonical_path_display_opt = canonical_path_holder.as_deref();
+            } else {
+                // canonical_path_holder is not assigned here, but rust requires it to be initialized
+                // if it's used later. However, it's only dereferenced if compat_output is true.
+                // To satisfy the compiler for all paths if it were used unconditionally:
+                canonical_path_holder = None; 
+            }
+            
+            process_file_entry(
+                &n,
+                &h,
+                current_file_size_opt,
+                canonical_path_display_opt,
+                audit_map,
+                compat_output,
+            );
         }
     }
 
